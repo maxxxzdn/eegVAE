@@ -1,7 +1,6 @@
 import torch
-import numpy as np
 from torch_geometric.utils import to_dense_adj, add_self_loops
-from torch_geometric.data import Data
+from torch_geometric.data import Data, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -52,55 +51,29 @@ def update_dataset(dataset, max_n_nodes = None):
         dataset_.append(Data(x = x, edge_index = edge_index, y = y, adj = adj))
     return dataset_
 
-def train(model, optimizer, loader, mask):
-    model.train()
-    train_loss = 0
-    for data in loader:
-        recovered, mu, logvar = model(data.x, data.edge_index, data.batch) 
-        adj = data.adj.reshape(-1, model.n_nodes**2)*mask
-        loss = loss_function(preds=recovered.reshape(-1, model.n_nodes**2)*mask, labels=adj,
-                             mu=mu, logvar=logvar)
-        loss.backward()
-        train_loss += loss.item()
-        optimizer.step()
+def cluster_centre(coordinates):
+    """
+    Finds centre of mass for a given distribution.
+    Args:
+        coordinates (tensor): coordinates of sampled points.
+    Returns:
+        centre of mass of given sampled points.
+    """
+    return coordinates.mean(0)
 
-    return train_loss / len(loader.dataset)
-
-def test(model, optimizer, loader, mask):
-    model.train(mode=False)
-    test_loss = 0
-    for data in loader:
-        recovered, mu, logvar = model(data.x, data.edge_index, data.batch) 
-        adj = data.adj.reshape(-1, model.n_nodes**2)*mask
-        loss = loss_function(preds=recovered.reshape(-1, model.n_nodes**2)*mask, labels=adj,
-                             mu=mu, logvar=logvar)
-        test_loss += loss.item()
-        optimizer.step()
-
-    return test_loss / len(loader.dataset)
-
-def fit(model, optimizer, train_loader, test_loader, epochs, save_file):
-    mask = create_mask(model.n_nodes).reshape(-1, model.n_nodes**2)
-    best_loss = np.inf
-    log = {'train_loss': [], 'test_loss': [], 'best_epoch': 0, 'best_test_loss': best_loss}
-    for epoch in tqdm(range(epochs), desc="Training for {} epochs".format(epochs)):
-        train_loss = train(model, optimizer, train_loader, mask)
-        test_loss = test(model, optimizer, test_loader, mask)
-        if test_loss < best_loss:
-            best_loss = test_loss
-            log['best_test_loss'] = best_loss
-            log['best_epoch'] = epoch
-            torch.save(model.state_dict(), save_file)            
-        log['train_loss'].append(train_loss)
-        log['test_loss'].append(test_loss)
-    print("Optimization Finished!")
-    print('Best epoch: {}'.format(log['best_epoch']), ', Best test set loss: {:.4f}'.format(best_loss))
-    
-    return log
-
-def performance_plot(log):
-    plt.plot(log["train_loss"], label = 'train loss')
-    plt.plot(log["test_loss"], label = 'test loss')
-    plt.vlines(x = np.argmin(log["test_loss"]), ymin = 0, ymax = np.max(log["test_loss"]), linestyle='dashed', label = 'best performance')
-    plt.legend()
-    plt.show()
+def get_cluster(model, dataset, y):
+    """
+    Maps instances of a class to latent space.
+    Args: 
+        model (nn.Module): VAE model.
+        dataset (list): list of torch_geometric.data.Data objects.
+        y (int): class label.
+    Returns:
+        tensor with coordinates in latent space for each instance of the class.
+    """
+    dataset_y = [data for data in dataset if data.y == y]
+    loader_y = DataLoader(dataset_y, batch_size=10**10, shuffle=True)
+    data_y = next(iter(loader_y))
+    a,b = model.encode(data_y.x, data_y.edge_index, data_y.batch)
+    z = model.reparameterize(a,b)
+    return z
