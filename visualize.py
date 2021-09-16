@@ -20,7 +20,7 @@ def show_graphs(adjacency_matrix, ax = None):
 def visualize_adj_graph(p_adj):   
     adj = (p_adj > 0.5) * 1.
     
-    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [10,5])
+    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
     img = ax1.imshow(p_adj)
     ax1.set_title('p(A)')
     ax2.imshow(adj)
@@ -33,7 +33,7 @@ def visualize_adj_graph(p_adj):
 def visualize_recon_adj(recovered, adj):
     recovered_ = (recovered > 0.5) * 1.
     
-    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [10,5])
+    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
     ax1.imshow(adj)
     ax1.set_title('A true')
     ax2.imshow(recovered_)
@@ -46,7 +46,7 @@ def visualize_recon_adj(recovered, adj):
 def visualize_recon_graph(recovered, adj):
     recovered_ = (recovered > 0.5) * 1.
     
-    f, (ax1, ax2) = plt.subplots(1, 2, figsize = [8,6])
+    f, (ax1, ax2) = plt.subplots(1, 2, figsize = [10,6])
     show_graphs(adj, ax = ax1)
     ax1.set_title('Graph true')
     show_graphs(recovered_, ax = ax2)
@@ -61,3 +61,14 @@ def visualize_z_space(z, y = None, z_centre = None):
         x_centre, y_centre = z_centre
         plt.scatter(x = x_centre, y = y_centre, c = 'red', marker = 'x', s = 200, label = 'cluster centre')
     plt.legend()
+    
+def vis_digitized(continuous, digitized): 
+    f, (ax1, ax2) = plt.subplots(1, 2, figsize = [10,5])
+    ax1.scatter(y = continuous, x = range(len(continuous)))
+    ax1.set_xlabel('# graph')
+    ax1.set_ylabel('$ z_1 $')
+    ax1.set_title('Distribution of continuous $z_1$')
+    ax2.scatter(y = digitized, x = range(len(digitized)))
+    ax2.set_xlabel('# graph')
+    ax2.set_ylabel('discretized $ z_1 $')
+    ax2.set_title('Distribution of discrete $z_1$')

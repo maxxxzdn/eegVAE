@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from torch_geometric.utils import to_dense_adj, add_self_loops
 from torch_geometric.data import Data, DataLoader
 import matplotlib.pyplot as plt
@@ -77,3 +78,16 @@ def get_cluster(model, dataset, y):
     a,b = model.encode(data_y.x, data_y.edge_index, data_y.batch)
     z = model.reparameterize(a,b)
     return z
+
+def digitize_z(z, n_bins = 10):
+    """
+    Digitizes a continuous variable z.
+    Args:
+        z (torch.tensor): continuous variable sampled.
+        n_bins (int): number of bins to discretize z across.
+    Returns:
+        discretized z.
+    """
+    bins = np.linspace(z.min().item(), z.max().item(), 10)
+    digitized = np.digitize(z, bins)
+    return digitized

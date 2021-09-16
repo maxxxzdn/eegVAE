@@ -4,6 +4,7 @@ import torch_geometric.nn as gnn
 import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
+from utils import *
 
 class GCNModelVAE(nn.Module):
     def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2):
