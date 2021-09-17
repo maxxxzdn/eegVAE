@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import copy
 import numpy as np
 from torch_geometric.utils import to_dense_adj, add_self_loops
 from torch_geometric.data import Data, DataLoader
@@ -6,6 +8,13 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from optimizer import *
+
+def clones(module, N, shared=False):
+    "Produce N identical layers (modules)."
+    if shared:
+        return nn.ModuleList(N*[module])
+    else:
+        return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 def create_mask(n_rows):
     """
@@ -32,12 +41,12 @@ def get_max_n_nodes(dataset):
     """
     return max([data.x.shape[0] for data in dataset])
                    
-def update_dataset(dataset, max_n_nodes = None):
+def update_dataset(dataset, max_n_nodes, dim_u):
     """
     Adds dense adjacency matrix for each graph in the dataset.
     Args:
         dataset (list): list of torch_geometric.data.Data objects.
-        max_n_nodes (int): if not None, add max_n_nodes - |v| shallow isolated nodes to each graph.
+        max_n_nodes (int): add max_n_nodes - |v| shallow isolated nodes to each graph.
     Returns:
         updated dataset with additional dense adjacency matrix.
     """
@@ -47,9 +56,11 @@ def update_dataset(dataset, max_n_nodes = None):
         x = torch.cat([data.x, torch.zeros(max_n_nodes - data.x.shape[0],7)],0)
         # Add self loops to make isolated nodes recognisable for DataLoader
         edge_index = add_self_loops(data.edge_index, num_nodes = max_n_nodes)[0]
+        edge_attr = torch.cat([data.edge_attr, torch.zeros(edge_index.shape[1] - data.edge_index.shape[1], data.edge_attr.shape[1])],0)
         y = data.y
+        u = torch.zeros([len(y), dim_u])
         adj = to_dense_adj(edge_index)
-        dataset_.append(Data(x = x, edge_index = edge_index, y = y, adj = adj))
+        dataset_.append(Data(x = x, edge_index = edge_index, edge_attr = edge_attr, u = u, y = y, adj = adj))
     return dataset_
 
 def cluster_centre(coordinates):
