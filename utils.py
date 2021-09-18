@@ -51,6 +51,7 @@ def update_dataset(dataset, max_n_nodes, dim_u):
         updated dataset with additional dense adjacency matrix.
     """
     dataset_ = []
+    mask = create_mask(max_n_nodes)
     for data in dataset:
         # Add missing shallow isolated nodes 
         x = torch.cat([data.x, torch.zeros(max_n_nodes - data.x.shape[0],7)],0)
@@ -59,7 +60,7 @@ def update_dataset(dataset, max_n_nodes, dim_u):
         edge_attr = torch.cat([data.edge_attr, torch.zeros(edge_index.shape[1] - data.edge_index.shape[1], data.edge_attr.shape[1])],0)
         y = data.y
         u = torch.zeros([len(y), dim_u])
-        adj = to_dense_adj(edge_index)
+        adj = to_dense_adj(edge_index)*mask
         dataset_.append(Data(x = x, edge_index = edge_index, edge_attr = edge_attr, u = u, y = y, adj = adj))
     return dataset_
 
@@ -102,3 +103,32 @@ def digitize_z(z, n_bins = 10):
     bins = np.linspace(z.min().item(), z.max().item(), 10)
     digitized = np.digitize(z, bins)
     return digitized
+
+def trian_elements(tensor):
+    """
+    Returns upper triangular matrix elemets of a tensor of shape [B,N,N].
+    Args:
+        tensor (torch.tensor): tensor of shape [B,N,N].
+    Returns:
+        upper trianglar matrix elements of shape [B,(N^2-N)/2].
+    """
+    n_rows = tensor.shape[1]
+    return tensor.permute(2,1,0)[torch.tril_indices(n_rows,n_rows, offset = -1).unbind()].T
+
+def tensor_from_trian(trian):
+    """
+    Reconstructs a symmetric tensor of shape [B,N,N] from its triangular matrix.
+    Args:
+        trian (torch.tensor): tensor of shape [B,(N^2-N)/2].
+    Returns:
+        tensor of shape [B,N,N].
+    """
+    n_elements = trian.shape[1]
+    # calculate number of rows in the original tensor
+    n_rows = int((1 + np.sqrt(1+8*n_elements))//2) 
+    tensor = torch.zeros(trian.shape[0], n_rows, n_rows).to(trian.device)
+    # fill upper triangular elements: 
+    tensor.permute(2,1,0)[torch.tril_indices(n_rows,n_rows, offset = -1).unbind()] = trian.T 
+    # mirror upper triangular elements below diagonal
+    tensor = (tensor.permute(2,1,0) + tensor.permute(1,2,0)).permute(2,0,1)
+    return tensor

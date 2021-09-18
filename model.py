@@ -9,16 +9,17 @@ from utils import *
 from meta import *
 
 class convVAE(nn.Module):
-    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2):
+    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta):
         super(convVAE, self).__init__()
         self.n_nodes = n_nodes
         self.latent_dim = hidden_dim2
         self.type = 'conv'
+        self.beta = beta
         self.gc1 = gnn.GraphConv(input_feat_dim, hidden_dim1)
         self.gc2 = gnn.GraphConv(hidden_dim1, hidden_dim2)
         self.gc3 = gnn.GraphConv(hidden_dim1, hidden_dim2)
         self.fc1 = nn.Linear(hidden_dim2, hidden_dim1)
-        self.fc2 = nn.Linear(hidden_dim1, n_nodes*n_nodes)
+        self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
 
     def encode(self, x, edge_index, batch):
         hidden1 = F.relu(self.gc1(x, edge_index))
@@ -41,16 +42,17 @@ class convVAE(nn.Module):
         return self.decode(z), mu, logvar
     
 class chebVAE(nn.Module):
-    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, K = 7):
+    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta, K = 7):
         super(chebVAE, self).__init__()
         self.n_nodes = n_nodes
         self.latent_dim = hidden_dim2
         self.type = 'cheb'
+        self.beta = beta
         self.gc1 = gnn.ChebConv(input_feat_dim, hidden_dim1, K)
         self.gc2 = gnn.ChebConv(hidden_dim1, hidden_dim2, K)
         self.gc3 = gnn.ChebConv(hidden_dim1, hidden_dim2, K)
         self.fc1 = nn.Linear(hidden_dim2, hidden_dim1)
-        self.fc2 = nn.Linear(hidden_dim1, n_nodes*n_nodes)
+        self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
 
     def encode(self, x, edge_index, batch):
         hidden1 = F.relu(self.gc1(x, edge_index))
@@ -73,16 +75,17 @@ class chebVAE(nn.Module):
         return self.decode(z), mu, logvar
     
 class attVAE(nn.Module):
-    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2):
+    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta):
         super(attVAE, self).__init__()
         self.n_nodes = n_nodes
         self.latent_dim = hidden_dim2
         self.type = 'att'
+        self.beta = beta
         self.gc1 = gnn.GATConv(input_feat_dim, hidden_dim1)
         self.gc2 = gnn.GATConv(hidden_dim1, hidden_dim2)
         self.gc3 = gnn.GATConv(hidden_dim1, hidden_dim2)
         self.fc1 = nn.Linear(hidden_dim2, hidden_dim1)
-        self.fc2 = nn.Linear(hidden_dim1, n_nodes*n_nodes)
+        self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
 
     def encode(self, x, edge_index, batch):
         hidden1 = F.relu(self.gc1(x, edge_index))
@@ -105,16 +108,17 @@ class attVAE(nn.Module):
         return self.decode(z), mu, logvar
     
 class mpVAE(nn.Module):
-    def __init__(self, n_nodes, dims):
+    def __init__(self, n_nodes, dims, beta):
         super(mpVAE, self).__init__()
         self.n_nodes = n_nodes
         self.latent_dim = dims["u_f"]
-        self.type = 'mp'        
+        self.type = 'mp'     
+        self.beta = beta
         self.gc1 = MetaLayer(EdgeModel(dims), NodeModel(dims), GlobalModel(dims))
         self.gc2 = MetaLayer(EdgeModel(dims), NodeModel(dims), GlobalModel(dims))
         self.gc3 = MetaLayer(EdgeModel(dims), NodeModel(dims), GlobalModel(dims))      
         self.fc1 = nn.Linear(dims["u_f"], 100)
-        self.fc2 = nn.Linear(100, n_nodes*n_nodes)
+        self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
 
     def encode(self, x, edge_index, edge_attr, u, batch):
         x, edge_attr, u = self.gc1(x, edge_index, edge_attr, u, batch)
@@ -138,25 +142,28 @@ class mpVAE(nn.Module):
         mu, logvar = self.encode(x, edge_index, edge_attr, u, batch)
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
-    
-def train(model, optimizer, loader, mask):
+       
+def train(model, optimizer, loader):
     model.train()
     train_loss = 0
     for data in loader:
         if model.type == 'mp':
             recovered, mu, logvar = model(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
         else: 
-            recovered, mu, logvar = model(data.x, data.edge_index, data.batch)             
-        adj = data.adj.reshape(-1, model.n_nodes**2)*mask
-        loss = loss_function(preds=recovered.reshape(-1, model.n_nodes**2)*mask, labels=adj,
-                             mu=mu, logvar=logvar)
+            recovered, mu, logvar = model(data.x, data.edge_index, data.batch)  
+            
+        adj = data.adj.reshape(-1, model.n_nodes, model.n_nodes)
+        adj = trian_elements(adj)
+        
+        loss = loss_function(preds=recovered, labels=adj,
+                             mu=mu, logvar=logvar, beta=model.beta)
         loss.backward()
         train_loss += loss.item()
         optimizer.step()
 
     return train_loss / len(loader.dataset)
 
-def test(model, loader, mask):
+def test(model, loader):
     model.train(mode=False)
     test_loss = 0
     for data in loader:
@@ -164,20 +171,22 @@ def test(model, loader, mask):
             recovered, mu, logvar = model(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
         else: 
             recovered, mu, logvar = model(data.x, data.edge_index, data.batch)
-        adj = data.adj.reshape(-1, model.n_nodes**2)*mask
-        loss = loss_function(preds=recovered.reshape(-1, model.n_nodes**2)*mask, labels=adj,
-                             mu=mu, logvar=logvar)
+            
+        adj = data.adj.reshape(-1, model.n_nodes, model.n_nodes)
+        adj = trian_elements(adj)
+        
+        loss = loss_function(preds=recovered, labels=adj,
+                             mu=mu, logvar=logvar, beta=model.beta)
         test_loss += loss.item()
 
     return test_loss / len(loader.dataset)
 
 def fit(model, optimizer, train_loader, test_loader, epochs, save_file):
-    mask = create_mask(model.n_nodes).reshape(-1, model.n_nodes**2)
     best_loss = np.inf
     log = {'train_loss': [], 'test_loss': [], 'best_epoch': 0, 'best_test_loss': best_loss}
     for epoch in tqdm(range(epochs), desc="Training for {} epochs".format(epochs)):
-        train_loss = train(model, optimizer, train_loader, mask)
-        test_loss = test(model, test_loader, mask)
+        train_loss = train(model, optimizer, train_loader)
+        test_loss = test(model, test_loader)
         if test_loss < best_loss:
             best_loss = test_loss
             log['best_test_loss'] = best_loss

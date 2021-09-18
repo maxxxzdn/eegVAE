@@ -17,8 +17,8 @@ def show_graphs(adjacency_matrix, ax = None):
     gr.add_edges_from(edges)
     nx.draw(gr, node_size=500, ax = ax)
     
-def visualize_adj_graph(p_adj):   
-    adj = (p_adj > 0.5) * 1.
+def visualize_adj_graph(p_adj, threshold = 0.5):   
+    adj = (p_adj > threshold) * 1.
     
     f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
     img = ax1.imshow(p_adj)
@@ -30,8 +30,8 @@ def visualize_adj_graph(p_adj):
     plt.colorbar(img, ax=ax1, fraction=0.046, pad=0.04)
     plt.show()
     
-def visualize_recon_adj(recovered, adj):
-    recovered_ = (recovered > 0.5) * 1.
+def visualize_recon_adj(recovered, adj, threshold = 0.5):
+    recovered_ = (recovered > threshold) * 1.
     
     f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
     ax1.imshow(adj)
@@ -43,8 +43,8 @@ def visualize_recon_adj(recovered, adj):
     plt.colorbar(img, ax=ax3,fraction=0.046, pad=0.04)
     plt.show()
     
-def visualize_recon_graph(recovered, adj):
-    recovered_ = (recovered > 0.5) * 1.
+def visualize_recon_graph(recovered, adj, threshold = 0.5):
+    recovered_ = (recovered > threshold) * 1.
     
     f, (ax1, ax2) = plt.subplots(1, 2, figsize = [10,6])
     show_graphs(adj, ax = ax1)

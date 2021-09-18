@@ -1,6 +1,6 @@
 import torch.nn.functional as F
 
-def loss_function(preds, labels, mu, logvar):
+def loss_function(preds, labels, mu, logvar, beta = 1.):
     # Reconstruction + KL divergence losses summed over all elements and batch
     BCE = F.binary_cross_entropy(preds, labels, reduction='sum')
     # see Appendix B from VAE paper:
@@ -9,4 +9,4 @@ def loss_function(preds, labels, mu, logvar):
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     KLD = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum()
 
-    return BCE + KLD
+    return BCE + beta*KLD
