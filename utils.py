@@ -54,7 +54,7 @@ def update_dataset(dataset, max_n_nodes, dim_u):
     mask = create_mask(max_n_nodes)
     for data in dataset:
         # Add missing shallow isolated nodes 
-        x = torch.cat([data.x, torch.zeros(max_n_nodes - data.x.shape[0],7)],0)
+        x = torch.cat([data.x, torch.zeros(max_n_nodes - data.x.shape[0],data.x.shape[1])],0)
         # Add self loops to make isolated nodes recognisable for DataLoader
         edge_index = add_self_loops(data.edge_index, num_nodes = max_n_nodes)[0]
         edge_attr = torch.cat([data.edge_attr, torch.zeros(edge_index.shape[1] - data.edge_index.shape[1], data.edge_attr.shape[1])],0)
@@ -87,7 +87,12 @@ def get_cluster(model, dataset, y):
     dataset_y = [data for data in dataset if data.y == y]
     loader_y = DataLoader(dataset_y, batch_size=10**10, shuffle=True)
     data_y = next(iter(loader_y))
-    a,b = model.encode(data_y.x, data_y.edge_index, data_y.batch)
+    if model.type == 'mp':
+        a,b = model.encode(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
+    elif model.type == 'adj':
+        a,b = model.encode(data_y.adj.view(-1, model.n_nodes*model.n_nodes))
+    else: 
+        a,b = model.encode(data_y.x, data_y.edge_index, data_y.batch)
     z = model.reparameterize(a,b)
     return z
 

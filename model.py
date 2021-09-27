@@ -8,13 +8,45 @@ from torch_geometric.nn import MetaLayer
 from utils import *
 from meta import *
 
+class adjVAE(nn.Module):
+    def __init__(self, n_nodes, hidden_dim1, hidden_dim2, beta):
+        super(adjVAE, self).__init__()
+        self.latent_dim = hidden_dim2
+        self.n_nodes = n_nodes
+        self.beta = beta
+        self.type = 'adj'
+        self.fc1 = nn.Linear(n_nodes*n_nodes, hidden_dim1)
+        self.fc21 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc22 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.fc3 = nn.Linear(hidden_dim2, hidden_dim1)
+        self.fc4 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
+
+    def encode(self, x):
+        h1 = F.relu(self.fc1(x))
+        return self.fc21(h1), self.fc22(h1)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mu + eps*std
+
+    def decode(self, z):
+        h3 = F.relu(self.fc3(z))
+        return torch.sigmoid(self.fc4(h3))
+
+    def forward(self, x):
+        mu, logvar = self.encode(x.view(-1, self.n_nodes*self.n_nodes))
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar
+    
 class convVAE(nn.Module):
-    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta):
+    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta, dropout):
         super(convVAE, self).__init__()
         self.n_nodes = n_nodes
         self.latent_dim = hidden_dim2
         self.type = 'conv'
         self.beta = beta
+        self.dropout = dropout
         self.gc1 = gnn.GraphConv(input_feat_dim, hidden_dim1)
         self.gc2 = gnn.GraphConv(hidden_dim1, hidden_dim2)
         self.gc3 = gnn.GraphConv(hidden_dim1, hidden_dim2)
@@ -22,7 +54,7 @@ class convVAE(nn.Module):
         self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
 
     def encode(self, x, edge_index, batch):
-        hidden1 = F.relu(self.gc1(x, edge_index))
+        hidden1 = F.relu(F.dropout(self.gc1(x, edge_index), self.dropout))
         mu = gnn.global_mean_pool(self.gc2(hidden1, edge_index), batch)
         logvar = gnn.global_mean_pool(self.gc3(hidden1, edge_index), batch)
         return mu.squeeze(), logvar.squeeze()
@@ -33,7 +65,7 @@ class convVAE(nn.Module):
         return mu + eps*std
         
     def decode(self, z):
-        h = F.relu(self.fc1(z))
+        h = F.relu(F.dropout(self.fc1(z), self.dropout))
         return torch.sigmoid(self.fc2(h))
         
     def forward(self, x, edge_index, batch):
@@ -118,7 +150,7 @@ class mpVAE(nn.Module):
         self.gc2 = MetaLayer(EdgeModel(dims), NodeModel(dims), GlobalModel(dims))
         self.gc3 = MetaLayer(EdgeModel(dims), NodeModel(dims), GlobalModel(dims))      
         self.fc1 = nn.Linear(dims["u_f"], 100)
-        self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
+        self.fc2 = nn.Linear(100, (n_nodes*n_nodes - n_nodes)//2)
 
     def encode(self, x, edge_index, edge_attr, u, batch):
         x, edge_attr, u = self.gc1(x, edge_index, edge_attr, u, batch)
@@ -147,8 +179,11 @@ def train(model, optimizer, loader):
     model.train()
     train_loss = 0
     for data in loader:
+        optimizer.zero_grad()
         if model.type == 'mp':
             recovered, mu, logvar = model(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
+        elif model.type == 'adj':
+            recovered, mu, logvar = model(data.adj)
         else: 
             recovered, mu, logvar = model(data.x, data.edge_index, data.batch)  
             
@@ -169,6 +204,8 @@ def test(model, loader):
     for data in loader:
         if model.type == 'mp':
             recovered, mu, logvar = model(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
+        elif model.type == 'adj':
+            recovered, mu, logvar = model(data.adj)
         else: 
             recovered, mu, logvar = model(data.x, data.edge_index, data.batch)
             
