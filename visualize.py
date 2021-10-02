@@ -8,7 +8,7 @@ def performance_plot(log):
     plt.plot(log["test_loss"], label = 'test loss')
     plt.vlines(x = np.argmin(log["test_loss"]), ymin = 0, ymax = np.max(log["test_loss"]), linestyle='dashed', label = 'best performance')
     plt.legend()
-    plt.show()
+
     
 def show_graphs(adjacency_matrix, ax = None):
     rows, cols = np.where(adjacency_matrix == 1)

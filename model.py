@@ -39,6 +39,43 @@ class adjVAE(nn.Module):
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
     
+class conv_mlp_VAE(nn.Module):
+    def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta, dropout):
+        super(conv_mlp_VAE, self).__init__()
+        self.n_nodes = n_nodes
+        self.latent_dim = hidden_dim2
+        self.type = 'conv_mlp'
+        self.beta = beta
+        self.dropout = dropout
+        self.gc1 = gnn.GraphConv(input_feat_dim, hidden_dim1)
+        self.gc2 = gnn.GraphConv(hidden_dim1, hidden_dim1)
+        self.fc01 = nn.Linear(n_nodes*hidden_dim1, hidden_dim2)
+        self.fc02 = nn.Linear(n_nodes*hidden_dim1, hidden_dim2)
+        self.fc1 = nn.Linear(hidden_dim2, hidden_dim1)
+        self.fc2 = nn.Linear(hidden_dim1, (n_nodes*n_nodes - n_nodes)//2)
+
+    def encode(self, x, edge_index, batch):
+        bs = max(batch) + 1
+        hidden1 = F.relu(F.dropout(self.gc1(x, edge_index), self.dropout))
+        hidden2 = F.relu(F.dropout(self.gc2(hidden1, edge_index), self.dropout))
+        mu = self.fc01(hidden2.view(bs, -1))
+        logvar = self.fc02(hidden2.view(bs, -1))
+        return mu.squeeze(), logvar.squeeze()
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mu + eps*std
+        
+    def decode(self, z):
+        h = F.relu(F.dropout(self.fc1(z), self.dropout))
+        return torch.sigmoid(self.fc2(h))
+        
+    def forward(self, x, edge_index, batch):
+        mu, logvar = self.encode(x, edge_index, batch)
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar
+    
 class convVAE(nn.Module):
     def __init__(self, n_nodes, input_feat_dim, hidden_dim1, hidden_dim2, beta, dropout):
         super(convVAE, self).__init__()
