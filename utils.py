@@ -1,4 +1,5 @@
 import torch
+import random
 import torch.nn as nn
 import copy
 import numpy as np
@@ -6,6 +7,7 @@ from torch_geometric.utils import to_dense_adj, add_self_loops
 from torch_geometric.data import Data, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from torch_geometric.data import Data
 
 from optimizer import *
 
@@ -57,11 +59,22 @@ def update_dataset(dataset, max_n_nodes, dim_u):
         x = torch.cat([data.x, torch.zeros(max_n_nodes - data.x.shape[0],data.x.shape[1])],0)
         # Add self loops to make isolated nodes recognisable for DataLoader
         edge_index = add_self_loops(data.edge_index, num_nodes = max_n_nodes)[0]
+        try:
+            edge_index_ = add_self_loops(data.edge_index_, num_nodes = max_n_nodes)[0]
+        except: 
+            edge_index_ = None
         edge_attr = torch.cat([data.edge_attr, torch.zeros(edge_index.shape[1] - data.edge_index.shape[1], data.edge_attr.shape[1])],0)
         y = data.y
-        u = torch.zeros([len(y), dim_u])
         adj = to_dense_adj(edge_index)*mask
-        dataset_.append(Data(x = x, edge_index = edge_index, edge_attr = edge_attr, u = u, y = y, adj = adj))
+        try:
+            adj_ = to_dense_adj(edge_index_)*mask
+        except:
+            adj_ = None
+        if dim_u is not None:
+            u = torch.zeros([len(y), dim_u])
+        else:
+            u = None
+        dataset_.append(Data(x = x, edge_index = edge_index, edge_attr = edge_attr, u = u, y = y, adj = adj, adj_ = adj_))
     return dataset_
 
 def cluster_centre(coordinates):
@@ -137,3 +150,67 @@ def tensor_from_trian(trian):
     # mirror upper triangular elements below diagonal
     tensor = (tensor.permute(2,1,0) + tensor.permute(1,2,0)).permute(2,0,1)
     return tensor
+
+def add_edge(edge_index, i, j):
+    """
+    Adds undirected edge (i->j, j->i) to sparse adjacency matrix.
+    Args:
+        edge_index (torch.tensor): sparse adjacency matrix.
+        i,j (int): number of nodes connected by the edge.
+    Returns:
+        updated sparse adjacency matrix.
+    """
+    to = torch.tensor([i,j])
+    out = torch.tensor([j,i])
+    edge_index = torch.cat([edge_index, to.unsqueeze(1)], 1)
+    edge_index = torch.cat([edge_index, out.unsqueeze(1)], 1)
+    return edge_index
+
+def get_copy(data):
+    """
+    Returns a copy of Data object containing x, y, edge_attr, edge_index.
+    Args:
+        data (torch_geometric.data.Data): graph as Data object. 
+    Returns:
+        copy of data with edge_index_ attribute as copied edge_index.
+    """
+    edge_index = data.edge_index.detach().clone()
+    edge_attr = data.edge_attr.detach().clone()
+    x = data.x.detach().clone()
+    y = data.y.detach().clone()
+    return Data(x = x, y = y, edge_index = edge_index, edge_attr = edge_attr, edge_index_ = edge_index)
+    
+def add_edge_noise(dataset, n, m):
+    """
+    Adds undirected edge (i->j, j->i) to sparse adjacency matrix.
+    Args:
+        edge_index (torch.tensor): sparse adjacency matrix.
+        i,j (int): number of nodes connected by the edge.
+    Returns:
+        updated sparse adjacency matrix.
+    """
+    dataset_ = copy.deepcopy(dataset)
+    for _ in range(n):
+        data = random.choice(dataset)
+        data_ = get_copy(data)
+        for i in range(m):
+            k = random.randint(0, data_.edge_index.max())
+            j = random.randint(0, data_.edge_index.max())
+            if not in_adjacency(data_.edge_index, [k, j]):
+                data_.edge_index = add_edge(data_.edge_index, k, j)
+        dataset_.append(data_)
+    return dataset_
+
+def in_adjacency(edge_index, edge):\
+    """
+    Checks if the edge is in the given adjacency matrix.
+    Args:
+        edge_index (torch.tensor): sparse adjacency matrix.
+        edge (list [int,int]): edge of form [node1, node2].
+    Returns:
+        True if edge is in edge_index, False else.
+    """
+    to = edge[0]
+    out = edge[1]
+    intsec = np.intersect1d(np.where(edge_index[0] == to), np.where(edge_index[1] == out))
+    return len(intsec)

@@ -8,7 +8,6 @@ def performance_plot(log):
     plt.plot(log["test_loss"], label = 'test loss')
     plt.vlines(x = np.argmin(log["test_loss"]), ymin = 0, ymax = np.max(log["test_loss"]), linestyle='dashed', label = 'best performance')
     plt.legend()
-
     
 def show_graphs(adjacency_matrix, ax = None):
     rows, cols = np.where(adjacency_matrix == 1)
@@ -19,21 +18,22 @@ def show_graphs(adjacency_matrix, ax = None):
     
 def visualize_adj_graph(p_adj, threshold = 0.5):   
     adj = (p_adj > threshold) * 1.
-    
     f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
     img = ax1.imshow(p_adj)
     ax1.set_title('p(A)')
     ax2.imshow(adj)
     ax2.set_title('A reconstructed')
     show_graphs(adj, ax = ax3)
-    ax3.set_title('Graph reconstructed')    
+    ax3.set_title('Graph reconstructed')
     plt.colorbar(img, ax=ax1, fraction=0.046, pad=0.04)
     plt.show()
     
-def visualize_recon_adj(recovered, adj, threshold = 0.5):
+def visualize_recon_adj(recovered, adj, threshold = 0.5, adj_clear=None):
     recovered_ = (recovered > threshold) * 1.
-    
-    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
+    if adj_clear is not None:
+        f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize = [10,10])
+    else: 
+        f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize = [15,5])
     ax1.imshow(adj)
     ax1.set_title('A true')
     ax2.imshow(recovered_)
@@ -41,6 +41,9 @@ def visualize_recon_adj(recovered, adj, threshold = 0.5):
     img = ax3.imshow(recovered)
     ax3.set_title('p(A)')    
     plt.colorbar(img, ax=ax3,fraction=0.046, pad=0.04)
+    if adj_clear is not None:
+        ax4.imshow(adj_clear)
+        ax4.set_title('A clear')
     plt.show()
     
 def visualize_recon_graph(recovered, adj, threshold = 0.5):
