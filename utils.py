@@ -3,13 +3,152 @@ import random
 import torch.nn as nn
 import copy
 import numpy as np
-from torch_geometric.utils import to_dense_adj, add_self_loops
+from torch_geometric.utils import to_dense_adj, add_self_loops, dense_to_sparse
 from torch_geometric.data import Data, DataLoader
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from torch_geometric.data import Data
-
 from optimizer import *
+
+def KLD(p, q):
+    if p.family == q.family == 'Normal':
+        return lambda mu, logvar: 0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum()
+    elif p.family == q.family == 'Laplace':
+        return lambda mu, logb: -(-logb + math.log(p.b) - 1 + mu.abs()/p.b + 1/p.b*(logb-mu.abs()/logb.exp()).exp()).sum()
+
+class Normal():
+    def __init__(self, mu=None, var=None):
+        self.mu = mu
+        self.var = var
+        self.family = 'Normal'
+        
+class Laplace():
+    def __init__(self, mu=None, b=None):
+        self.mu = mu
+        self.b = b
+        self.family = 'Laplace'
+
+class CorrData():
+    def __init__(self, parameters, active_nodes):
+        self.n_nodes = parameters['n_nodes']
+        self.noise_mu = parameters['noise_mu']
+        self.len_sig = parameters['len_sig']
+        self.phase_mu = parameters['phase_mu']
+        if active_nodes is not None:
+            self.active_nodes = random.sample(active_nodes, parameters['n_active_nodes'])
+        else:
+            self.active_nodes = random.sample(list(range(self.n_nodes)), parameters['n_active_nodes'])
+        self.x = self.create_data()
+        self.adj = self.get_adj(self.x)
+        self.edge_index = dense_to_sparse(self.adj)[0]
+        self.y = 0
+   
+    def add_sin(self, x):
+        phase = self.phase_mu*np.random.randn(1)
+        o = np.arange(-3*np.pi, 3*np.pi, 6*np.pi/self.len_sig)
+        return np.sin(1*o + phase)
+    
+    def create_data(self):
+        noise = self.noise_mu*np.random.randn(self.n_nodes, self.len_sig)
+        sins = np.zeros_like(noise)
+        ind = self.active_nodes
+        sins[ind] = np.apply_along_axis(self.add_sin, -1, sins[ind]) 
+        return noise + sins
+    
+    def get_adj(self, x):
+        adj = (np.abs(np.corrcoef(x)) > 0.5)*1.0
+        return torch.tensor(adj).long()
+    
+class CorrDataset():
+    def __init__(self, parameters, active_nodes, n_graphs):
+        self.parameters = parameters
+        self.active_nodes = active_nodes
+        self.n_graphs = n_graphs
+        self.dataset = self.make_dataset()
+        
+    def make_dataset(self):
+        dataset = []
+        for _ in range(0, self.n_graphs//2):
+            data = CorrData(self.parameters, self.active_nodes)
+            data.y = 0
+            dataset.append(self.data_to_Data(data))
+        for _ in range(self.n_graphs//2, self.n_graphs):
+            data = CorrData(self.parameters, None)
+            data.y = 1
+            dataset.append(self.data_to_Data(data))
+        random.shuffle(dataset)
+        return dataset
+    
+    def data_to_Data(self, data):
+        x = torch.tensor(data.x).float()
+        adj = data.adj
+        edge_index = data.edge_index
+        y = torch.tensor(data.y).long()
+        return Data(x = x, adj = adj, edge_index = edge_index, y = y)
+
+def _sparseness(x):
+    """Hoyer's measure of sparsity for a vector"""
+    sqrt_n = np.sqrt(len(x))
+    return (sqrt_n - np.linalg.norm(x, 1) / np.sqrt(squared_norm(x))) / (sqrt_n - 1)
+
+def batch_sparseness(x, eps=1e-6):
+    x = x/(x.std(0) + eps) #normalization, see https://arxiv.org/pdf/1812.02833.pdf
+    return np.apply_along_axis(_sparseness, -1, x)
+
+def squared_norm(x):
+    """Squared Euclidean or Frobenius norm of x.
+
+    Returns the Euclidean norm when x is a vector, the Frobenius norm when x
+    is a matrix (2-d array). Faster than norm(x) ** 2.
+    """
+    x = np.ravel(x)
+    return np.dot(x, x)
+    
+class Tracker():
+    def __init__(self):
+        self.loss = 0
+        self.BCE = 0
+        self.KLD = 0
+        self.l1_loss = 0
+    def update(self, loss, BCE, KLD, l1_loss):
+        self.loss += loss.item()
+        self.BCE += BCE.item()
+        self.KLD += KLD.item()
+        if l1_loss.__class__ is torch.Tensor:
+            self.l1_loss += l1_loss.item()
+        else: 
+            self.l1_loss += l1_loss
+    def get_mean(self, N):
+        self.loss /= N
+        self.BCE /= N
+        self.KLD /= N
+        self.l1_loss /= N
+    def get_losses(self):
+        return [self.loss, self.BCE, self.KLD, self.l1_loss]
+    
+class Log():
+    def __init__(self):
+        self.loss = []
+        self.BCE = []
+        self.KLD = []
+        self.l1_loss = []
+    def append(self, losses):
+        loss, BCE, KLD, l1_loss = losses
+        self.loss.append(loss)
+        self.BCE.append(BCE)
+        self.KLD.append(KLD)
+        self.l1_loss.append(l1_loss)
+
+class Logger():
+    def __init__(self):
+        self.train = Log()
+        self.test = Log()
+        self.best_epoch = 0
+        self.best_test_loss = 0
+        self.sparseness = 0
+    def append(self, train_losses, test_losses):
+        self.train.append(train_losses)
+        self.test.append(test_losses)
 
 def clones(module, N, shared=False):
     "Produce N identical layers (modules)."
@@ -63,7 +202,10 @@ def update_dataset(dataset, max_n_nodes, dim_u):
             edge_index_ = add_self_loops(data.edge_index_, num_nodes = max_n_nodes)[0]
         except: 
             edge_index_ = None
-        edge_attr = torch.cat([data.edge_attr, torch.zeros(edge_index.shape[1] - data.edge_index.shape[1], data.edge_attr.shape[1])],0)
+        try:
+            edge_attr = torch.cat([data.edge_attr, torch.zeros(edge_index.shape[1] - data.edge_index.shape[1], data.edge_attr.shape[1])],0)
+        except:
+            edge_attr = None
         y = data.y
         adj = to_dense_adj(edge_index)*mask
         try:
@@ -201,7 +343,7 @@ def add_edge_noise(dataset, n, m):
         dataset_.append(data_)
     return dataset_
 
-def in_adjacency(edge_index, edge):\
+def in_adjacency(edge_index, edge):
     """
     Checks if the edge is in the given adjacency matrix.
     Args:
