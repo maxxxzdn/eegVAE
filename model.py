@@ -85,7 +85,7 @@ class VAE(nn.Module):
         BCE = F.binary_cross_entropy(preds, labels, reduction='sum')
         KLD = self.KLD(parameter1, parameter2)  
         l1_loss = F.l1_loss(z, zeros_like(z), reduction = 'sum')
-        return BCE + self.beta*KLD + self.gamma*l1_loss, BCE, KLD, l1_loss
+        return BCE - self.beta*KLD + self.gamma*l1_loss, BCE, KLD, l1_loss
        
 def train(model, optimizer, loader, gamma = 0.0, mode = True):
     model.train(mode = mode)
