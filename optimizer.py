@@ -1,6 +1,10 @@
 import torch.nn.functional as F
 from torch import zeros_like
 from math import log
+import torch
+from utils import *
+from torch_geometric.utils import dense_to_sparse
+
 
 def loss_function(preds, labels, mu, logvar, z, beta = 1., gamma = 0.):
     # Reconstruction + KL divergence losses summed over all elements and batch

@@ -9,6 +9,140 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from torch_geometric.data import Data
 from optimizer import *
+import itertools
+import models
+import encoders
+import pickle
+
+class LogExperiment():
+    def __init__(self):
+        self.loss = {'mean': [], 'std': []}
+        self.BCE = {'mean': [], 'std': []}
+        self.KLD = {'mean': [], 'std': []}
+        self.l1_loss = {'mean': [], 'std': []}
+        self.c1_loss = {'mean': [], 'std': []}
+        
+class LoggerExperiment():
+    def __init__(self):
+        self.train = LogExperiment()
+        self.test = LogExperiment()
+        self.sparseness = {'mean': [], 'std': []}
+        self.c1_loss = {'mean': [], 'std': []}
+        
+    def update(self, log_list):
+        
+        mean = np.array([log.sparseness for log in log_list]).mean(0)
+        std = np.array([log.sparseness for log in log_list]).std(0)
+
+        self.sparseness['mean'] = mean 
+        self.sparseness['std'] = std
+        
+        mean = np.array([log.c1_loss for log in log_list]).mean(0)
+        std = np.array([log.c1_loss for log in log_list]).std(0)
+
+        self.c1_loss['mean'] = mean 
+        self.c1_loss['std'] = std
+                  
+        for key in self.train.__dict__.keys():
+            mean = np.array([log.test.__dict__[key] for log in log_list]).mean(0)
+            std = np.array([log.test.__dict__[key] for log in log_list]).std(0)
+            
+            self.test.__dict__[key]['mean'] = mean 
+            self.test.__dict__[key]['std'] = std
+            
+            mean = np.array([log.train.__dict__[key] for log in log_list]).mean(0)
+            std = np.array([log.train.__dict__[key] for log in log_list]).std(0)
+            
+            self.train.__dict__[key]['mean'] = mean 
+            self.train.__dict__[key]['std'] = std
+
+class Experiment():
+    def __init__(self, parameters):
+        self.all_parameters = parameters
+        self.to_run = {k: v for k, v in parameters.items() if v.__class__ is list}
+        self.single_parameters = {k: v for k, v in parameters.items() if v.__class__ is not list}
+        self.logs = []
+
+    def run(self, train_loader, test_loader, N = 5):
+        for params in self._to_iter():
+            exp_log = LoggerExperiment()
+            _logs = []
+            for _ in range(N):
+                parameters = self.single_parameters | dict(zip(self.to_run.keys(), params))
+                model, optimizer = self.init_model(parameters)
+                log = models.fit(model, optimizer, train_loader, test_loader, parameters['epochs'], None)
+                _logs.append(log)
+            
+            exp_log.update(_logs)
+            self.logs.append(exp_log)
+                     
+    def _to_iter(self):
+        return list(itertools.product(*self.to_run.values()))
+    
+    def init_model(self, p):
+        encoder_ = getattr(encoders, 'Encoder_{}'.format(p['model_type']))
+        encoder = encoder_(p['n_nodes'], p['feat_dim'], p['hidden_dim'], p['latent_dim'], p['dropout'])
+        decoder = models.Decoder(p['n_nodes'], p['latent_dim'], p['hidden_dim'], p['dropout'])
+        model = models.VAE(encoder, decoder, p['prior'], p['posterior'], KLD, p['beta'], p['gamma'], p['delta'])    
+        optimizer = torch.optim.Adam(model.parameters(), lr=p['lr'])
+        return model, optimizer
+    
+    def visualize(self, metrics):
+        if metrics not in ['sparseness', 'c1_loss']:
+            for i in range(len(self._to_iter())):
+                mean = self.logs[i].test.__dict__[metrics]['mean']
+                std = self.logs[i].test.__dict__[metrics]['std']
+                epochs = range(self.all_parameters['epochs'])
+                label = str([str(a) for a in self._to_iter()[i]])
+                plt.plot(mean, label = label)
+                plt.fill_between(epochs, (mean-std), (mean+std), alpha = 0.5)
+            plt.legend()
+            low_lim = mean.mean() - mean.std()
+            up_lim = mean.mean() + mean.std()
+            plt.ylim(low_lim, up_lim)
+        else:
+            means = [log.__dict__[metrics]['mean'] for log in self.logs]
+            std = [log.__dict__[metrics]['std'] for log in self.logs]
+            x = range(len(self._to_iter()))
+            plt.bar(x, means, yerr=std)
+            names = [str([str(b) for b in a]).replace('(','').replace(')','').replace("'",'') for a in list(self._to_iter())]
+            plt.xticks(x, names)
+        plt.show()
+        
+    def save(self):
+        filehandler = open('exp.log', 'wb') 
+        pickle.dump(self, filehandler)
+        filehandler.close()
+        
+    def load(self):
+        filehandler = open('exp.log', 'rb') 
+        self.__dict__ = pickle.load(filehandler).__dict__
+        filehandler.close()
+
+        
+def computeC1Loss(args, model, guidanceTerm = True):
+    # extends C1 loss by guidance term
+    z = args['z']
+    noNodes, szLatDim = z.shape
+    I = torch.eye(szLatDim).unsqueeze(0).unsqueeze(2) # extract values of all minor diagonals (I = 1) 
+    I_minDiag = -1 * torch.eye(szLatDim).unsqueeze(0).unsqueeze(2) + 1 # extract values of all minor diagonals (I = 1) while this matrix is zero on main diagonal
+    if model.type == 'adj':
+        f = lambda z: model.encoder(tensor_from_trian(model.decoder(z)).reshape(-1, model.n_nodes**2))[0]
+    else: 
+        def f(z):
+            adj = tensor_from_trian(model.decoder(z)).reshape(-1, model.n_nodes, model.n_nodes)
+            edge_index, edge_weight = dense_to_sparse(adj)
+            args['edge_index'] = edge_index
+            args['edge_weight'] = edge_weight
+            x = args['x']
+            mu, logvar = model.encoder(x, args)
+            return mu
+    Jac = torch.autograd.functional.jacobian(f, z, create_graph = True).squeeze() # compute Jacobian
+    loss_C1 = torch.mean((Jac - I)**2) # extract + minimize values on minor diagonals
+    if(guidanceTerm):
+        min_diag_val = torch.mean((torch.diagonal(Jac, dim1 = 1, dim2 = 3) - 1)**2)
+        loss_C1 = loss_C1 + min_diag_val
+    return loss_C1
 
 def KLD(p, q):
     if p.family == q.family == 'Normal':
@@ -22,11 +156,17 @@ class Normal():
         self.var = var
         self.family = 'Normal'
         
+    def __str__(self):
+        return self.family + '(' + str(self.mu) + ',' + str(self.var) + ')'
+        
 class Laplace():
     def __init__(self, mu=None, b=None):
         self.mu = mu
         self.b = b
         self.family = 'Laplace'
+        
+    def __str__(self):
+        return self.family + '(' + str(self.mu) + ',' + str(self.var) + ')'
 
 class CorrData():
     def __init__(self, parameters, active_nodes):
@@ -110,7 +250,8 @@ class Tracker():
         self.BCE = 0
         self.KLD = 0
         self.l1_loss = 0
-    def update(self, loss, BCE, KLD, l1_loss):
+        self.c1_loss = 0
+    def update(self, loss, BCE, KLD, l1_loss, c1_loss):
         self.loss += loss.item()
         self.BCE += BCE.item()
         self.KLD += KLD.item()
@@ -118,13 +259,18 @@ class Tracker():
             self.l1_loss += l1_loss.item()
         else: 
             self.l1_loss += l1_loss
+        if c1_loss.__class__ is torch.Tensor:
+            self.c1_loss += c1_loss.item()
+        else: 
+            self.c1_loss += c1_loss
     def get_mean(self, N):
         self.loss /= N
         self.BCE /= N
         self.KLD /= N
         self.l1_loss /= N
+        self.c1_loss /= N
     def get_losses(self):
-        return [self.loss, self.BCE, self.KLD, self.l1_loss]
+        return [self.loss, self.BCE, self.KLD, self.l1_loss, self.c1_loss]
     
 class Log():
     def __init__(self):
@@ -132,13 +278,16 @@ class Log():
         self.BCE = []
         self.KLD = []
         self.l1_loss = []
+        self.c1_loss = []
     def append(self, losses):
-        loss, BCE, KLD, l1_loss = losses
+        loss, BCE, KLD, l1_loss, c1_loss = losses
         self.loss.append(loss)
         self.BCE.append(BCE)
         self.KLD.append(KLD)
         self.l1_loss.append(l1_loss)
+        self.c1_loss.append(c1_loss)
 
+        
 class Logger():
     def __init__(self):
         self.train = Log()
@@ -146,6 +295,7 @@ class Logger():
         self.best_epoch = 0
         self.best_test_loss = 0
         self.sparseness = 0
+        self.c1_loss = 0
     def append(self, train_losses, test_losses):
         self.train.append(train_losses)
         self.test.append(test_losses)
@@ -243,11 +393,11 @@ def get_cluster(model, dataset, y):
     loader_y = DataLoader(dataset_y, batch_size=10**10, shuffle=True)
     data_y = next(iter(loader_y))
     if model.type == 'mp':
-        a,b = model.encode(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
+        a,b = model.encoder(data.x, data.edge_index, data.edge_attr, data.u, data.batch)
     elif model.type == 'adj':
-        a,b = model.encode(data_y.adj.view(-1, model.n_nodes*model.n_nodes))
+        a,b = model.encoder(data_y.adj.view(-1, model.n_nodes*model.n_nodes))
     else: 
-        a,b = model.encode(data_y.x, data_y.edge_index, data_y.batch)
+        a,b = model.encoder(data_y.x, data_y.edge_index, data_y.batch)
     z = model.reparameterize(a,b)
     return z
 
