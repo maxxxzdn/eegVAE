@@ -4,7 +4,7 @@ import networkx as nx
 
     
 def performance_plot(log):
-    f, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(2, 3, figsize = [10,10])
+    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize = [10,10])
     ax1.plot(log.train.loss, label = 'train loss')
     ax1.plot(log.test.loss, label = 'test loss')
     ax1.vlines(x = np.argmin(log.test.loss), ymin = 0, ymax = np.max(log.test.loss), linestyle='dashed', label = 'best performance')
@@ -18,9 +18,6 @@ def performance_plot(log):
     ax4.plot(log.train.l1_loss, label = 'train L1')
     ax4.plot(log.test.l1_loss, label = 'test L1')
     ax4.legend()
-    ax5.plot(log.train.c1_loss, label = 'train C1')
-    ax5.plot(log.test.c1_loss, label = 'test C1')
-    ax5.legend()
     plt.show()
     
 def show_graphs(adjacency_matrix, ax = None):

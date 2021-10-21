@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/maksim/eegVAE/main.py", line 114, in <module>
+    wandb.log({"Train Accuracy": train_acc,
+NameError: name 'train_acc' is not defined
+Traceback (most recent call last):
+  File "/home/maksim/eegVAE/main.py", line 114, in <module>
+    wandb.log({"Train Accuracy": train_acc,
+NameError: name 'train_acc' is not defined
