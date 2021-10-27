@@ -1,4 +1,5 @@
 import copy
+import glob
 import random
 import torch
 import numpy as np
@@ -6,6 +7,41 @@ from torch_geometric.data import Data
 from torch_geometric.utils import dense_to_sparse, to_dense_adj, add_self_loops
 from utils import create_mask, add_edge, in_adjacency, get_copy
 
+class EEGData():
+    def __init__(self, file, tmin, tmax, y, threshold = 0.5):
+        """A graph with nodes carrying EEG signal
+        Args:
+            file (str): path to data.
+            tmin (int): start of the signal.
+            tmax (int): end of the signal.
+            y (int): label of the graph.
+            threshold (float): threshold for correlation coefficient.
+        """
+        self.ind = [[0,33],[1,34],[32,2,36,3],[37,4,38],[5,35,39,6],[40,41],[7,42],[8,60,9],[43,10],[44,45],[11,46,12],[47,13,48],[14,49,15],[16,50,17],[18,51,9],[20,52,21],[22,27],[53,23],[54,24,55],[25,56],[26,31],[28,57,58,29,59,30]]
+        self.threshold = threshold
+        self.x = self.normalize(np.loadtxt(file).T)[:, tmin:tmax]
+        self.x = self.compress(self.x)
+        self.adj = self.get_adj(self.x)
+        self.edge_index = dense_to_sparse(self.adj)[0]
+        self.y = y
+
+    def get_adj(self, x):
+        """
+        Construct adjacency matrix from a raw signal.
+        Args:
+            x (np.array): signal matrix of shape [n_nodes, len_signal].
+        Returns:
+            Adjacency matrix with 1 if corr coefficient > self.threshold else 0.
+        """
+        adj = (np.abs(np.corrcoef(x)) > self.threshold)*1.0
+        return torch.tensor(adj).long()
+    
+    def compress(self, x):
+        return np.array([x[i].mean(0) for i in self.ind])
+    
+    def normalize(self, x):
+        return (x - x.min())/(x.max()-x.min())
+        
 
 class CorrData():
     def __init__(self, parameters, active_nodes):
@@ -62,6 +98,48 @@ class CorrData():
         """
         adj = (np.abs(np.corrcoef(x)) > 0.5)*1.0
         return torch.tensor(adj).long()
+    
+class EEGDataset():
+    def __init__(self, folder, tmin, tmax, y, threshold):
+        """
+        Args:
+            folder (str): path to data.
+            tmin (int): start of the signal.
+            tmax (int): end of the signal.
+            y (int): label of the graph.
+            threshold (float): threshold for correlation coefficient.
+        """
+        self.threshold = threshold
+        self.dataset = self.make_dataset(folder, tmin, tmax, y)
+        
+    def make_dataset(self, folder, tmin, tmax, y):
+        """
+        Creates a dataset.
+        """
+        dataset = []
+        for file in glob.glob(folder + '/*'):
+            data = EEGData(file, tmin, tmax, y, self.threshold)
+            
+            dataset.append(self.to_data(data))
+        random.shuffle(dataset)
+        return dataset   
+    @staticmethod
+    def to_data(data):
+        """
+        Turns CorrData instance into torch_geometric.data.Data
+        Args: 
+            data (CorrData): instance of CorrData class
+        Returns:
+            torch_geometric.data.Data instance
+        """
+        x = torch.tensor(data.x).float()
+        adj = data.adj
+        edge_index = data.edge_index
+        y = torch.tensor(data.y).long()
+        return Data(x = x, adj = adj, edge_index = edge_index, y = y)
+    def __add__(self, other):
+        self.dataset += other.dataset
+        return self
     
 class CorrDataset():
     def __init__(self, parameters, active_nodes, n_graphs):
