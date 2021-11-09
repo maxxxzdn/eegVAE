@@ -9,8 +9,8 @@ def performance_plot(log):
     ax1.plot(log.test.loss, label = 'test loss')
     ax1.vlines(x = np.argmin(log.test.loss), ymin = 0, ymax = np.max(log.test.loss), linestyle='dashed', label = 'best performance')
     ax1.legend()
-    ax2.plot(log.train.BCE, label = 'train BCE')
-    ax2.plot(log.test.BCE, label = 'test BCE')
+    ax2.plot(log.train.rec, label = 'train rec_loss')
+    ax2.plot(log.test.rec, label = 'test rec_loss')
     ax2.legend()
     ax3.plot(log.train.KLD, label = 'train KLD')
     ax3.plot(log.test.KLD, label = 'test KLD')
@@ -25,7 +25,12 @@ def show_graphs(adjacency_matrix, ax = None):
     edges = zip(rows.tolist(), cols.tolist())
     gr = nx.Graph()
     gr.add_edges_from(edges)
-    nx.draw(gr, node_size=500, ax = ax)
+    if adjacency_matrix.shape[-1] == 61:
+        pos = np.genfromtxt('../Downloads/Easycap_Koordinaten_61CH(1).txt')[:,0:2]
+        gr.remove_edges_from(nx.selfloop_edges(gr))
+        nx.draw(gr, pos = pos, node_size=500, ax = ax)
+    else:
+        nx.draw(gr, node_size=500, ax = ax)
     
 def visualize_adj_graph(p_adj, threshold = 0.5):   
     adj = (p_adj > threshold) * 1.

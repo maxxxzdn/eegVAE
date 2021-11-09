@@ -3,10 +3,10 @@ from torch_geometric.data import DataLoader
 from tqdm import tqdm
 from numpy import inf
 from torch import save
-from utils import trian_elements
+from utils import trian_elements, scheduler
 from metrics import calculate_sparseness, calculate_cov
 
-def train(model, optimizer, loader, mode = True):
+def train(model, optimizer, loader, mode = True, beta=1.):
     model.train(mode = mode)
     train_tracker = Tracker()
     for data in loader:
@@ -16,25 +16,27 @@ def train(model, optimizer, loader, mode = True):
         adj = data.adj.reshape(-1, model.n_nodes, model.n_nodes)
         adj = trian_elements(adj)
         
-        loss, BCE, KLD, l1_loss = model.loss_function(preds=recovered, labels=adj,
-                             loc=loc, logscale=logscale, latent=latent)
-        train_tracker.update(loss, BCE, KLD, l1_loss)
+        loss, rec, KLD, l1_loss = model.loss_function(preds=recovered, labels=adj,
+                             loc=loc, logscale=logscale, latent=latent, beta=beta)
+        train_tracker.update(loss, rec, KLD, l1_loss)
         loss.backward()
         if mode:
             optimizer.step()
     train_tracker.get_mean(len(loader.dataset))
     return train_tracker.get_losses()
 
-def fit(model, optimizer, train_loader, test_loader, epochs, save_file):
+def fit(model, optimizer, train_loader, test_loader, epochs, save_file, schedule_beta):
     all_loader = DataLoader(test_loader.dataset, batch_size=10**10, shuffle=False)
     best_loss = inf
     log = Logger()
     for epoch in tqdm(range(epochs), desc="Training for {} epochs".format(epochs)):
-        train_losses= train(model, optimizer, train_loader, True)
-        test_losses = train(model, optimizer, test_loader, False)
+        beta = scheduler(epoch, model.beta, epochs) if schedule_beta else model.beta
+        train_losses= train(model, optimizer, train_loader, True, beta)
+        test_losses = train(model, optimizer, test_loader, False, beta)
         if test_losses[0] < best_loss:
             best_loss = test_losses[0]
             log.best_test_loss = best_loss
+            log.best_rec_loss = test_losses[1]
             log.best_epoch = epoch
             log.sparseness = calculate_sparseness(all_loader, model)
             log.cov = calculate_cov(all_loader, model)
@@ -43,7 +45,8 @@ def fit(model, optimizer, train_loader, test_loader, epochs, save_file):
         log.append(train_losses, test_losses)
     print("Optimization Finished!")
     print("Model type: " + model.type)
-    print('Best epoch: {}'.format(log.best_epoch), ', Best test set loss: {:.4f}'.format(log.best_test_loss))
+    print('Best epoch: {}'.format(log.best_epoch), ', Best test rec loss: {:.4f}'.format(log.best_rec_loss), ', Best test loss: {:.4f}'.format(log.best_test_loss))
+    
     print('Sparseness: {:.3f}'.format(log.sparseness))
     print('Cov: {:.3f}'.format(log.cov))
     return log
