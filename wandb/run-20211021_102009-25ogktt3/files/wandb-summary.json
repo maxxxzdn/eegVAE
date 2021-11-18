@@ -1,1 +1,0 @@
-{"Best Loss": 298.97839599609375, "Best BCE": 297.43342041015626, "Best KLD": -1.544973735809326, "Best L1 loss": 0.0, "Best epoch": 0, "Sparseness": 0.2528579759597778, "Covariance": 0.003527818688008882, "_runtime": 2, "_timestamp": 1634804411, "_step": 0, "_wandb": {"runtime": 3}}
