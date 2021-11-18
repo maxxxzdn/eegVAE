@@ -5,6 +5,17 @@ import copy
 import numpy as np
 from torch_geometric.data import Data, DataLoader
 import itertools
+import math
+
+
+def sigmoid(x):
+    return 1 / (1 + math.exp(-x))
+
+def scheduler(x, b = 1, epochs = 200):
+    if x < epochs*1//2:
+        return b*torch.sigmoid(torch.arange(-10,10,20/(epochs*1//2)))[x]
+    else:
+        return b
 
 
 def clones(module, N, shared=False):
@@ -93,15 +104,15 @@ def tensor_from_trian(trian):
     Returns:
         tensor of shape [B,N,N].
     """
-    n_elements = trian.shape[1]
+    n_elements = trian.shape[-1]
     # calculate number of rows in the original tensor
     n_rows = int((1 + np.sqrt(1+8*n_elements))//2) 
-    tensor = torch.zeros(trian.shape[0], n_rows, n_rows).to(trian.device)
+    tensor = torch.zeros(trian.shape[0], trian.shape[1], n_rows, n_rows).to(trian.device)
     # fill upper triangular elements: 
-    tensor.permute(2,1,0)[torch.tril_indices(n_rows,n_rows, offset = -1).unbind()] = trian.T 
+    tensor.permute(3,2,1,0)[torch.tril_indices(n_rows,n_rows, offset = -1).unbind()] = trian.T 
     # mirror upper triangular elements below diagonal
-    tensor = (tensor.permute(2,1,0) + tensor.permute(1,2,0)).permute(2,0,1)
-    return tensor
+    tensor = (tensor + tensor.permute(0,1,3,2))
+    return tensor 
 
 def add_edge(edge_index, i, j):
     """
@@ -146,3 +157,44 @@ def in_adjacency(edge_index, edge):
     out = edge[1]
     intsec = np.intersect1d(np.where(edge_index[0] == to), np.where(edge_index[1] == out))
     return len(intsec)
+
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
+    
+class Aggregator(nn.Module):
+    def __init__(self, mode):
+        super().__init__()
+        self.mode = mode
+    def forward(self, input):
+        if self.mode == 'mean':
+            return input.mean(1)
+        elif self.mode == 'max':
+            return input.max(1).values
+        elif self.mode == 'none':
+            return input.view(input.shape[0],-1)
+        
+class UnFlatten(nn.Module):
+    def __init__(self, var, size=None):
+        super().__init__()
+        self.var = var
+        self.size = size
+    def forward(self, input):
+        if self.var == 'z':
+            return input.view(-1,32,12)
+        elif self.var == 'w':
+            return input.view(input.shape[0]*input.shape[1], self.size, 1, 1)
+        
+class ToSymmetric(nn.Module):
+    def __init__(self, from_triang):
+        super().__init__()
+        self.from_triang = from_triang
+    def forward(self, input):
+        if not self.from_triang:
+            eye = torch.eye(input.shape[-1]).view(1,1,input.shape[-1],input.shape[-1]).repeat(1,input.shape[1],1,1).to(input.device)
+            input = input.tril(-1)
+            return input + input.permute(0,1,3,2) + eye
+        else:
+            output = tensor_from_trian(input)
+            eye = torch.eye(output.shape[-1]).view(1,1,output.shape[-1],output.shape[-1]).repeat(1,output.shape[1],1,1).to(output.device)
+            return (output + eye).permute(1,0,2,3)
