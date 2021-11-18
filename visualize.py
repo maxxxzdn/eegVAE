@@ -4,20 +4,32 @@ import networkx as nx
 
     
 def performance_plot(log):
-    f, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize = [10,10])
-    ax1.plot(log.train.loss, label = 'train loss')
-    ax1.plot(log.test.loss, label = 'test loss')
-    ax1.vlines(x = np.argmin(log.test.loss), ymin = 0, ymax = np.max(log.test.loss), linestyle='dashed', label = 'best performance')
+    f, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize = [10,10])
+    ax1.plot(log.train.elbo, label = 'train ELBO')
+    ax1.plot(log.test.elbo, label = 'test ELBO')
+    ax1.set_xlabel('epoch')
+    ax1.vlines(x = np.argmin(log.test.elbo), ymin = 0, ymax = np.max(log.test.elbo), linestyle='dashed', label = 'best performance')
     ax1.legend()
-    ax2.plot(log.train.rec, label = 'train rec_loss')
-    ax2.plot(log.test.rec, label = 'test rec_loss')
+    ax2.plot(log.train.recon_loss_x, label = 'train X reconstruction')
+    ax2.plot(log.test.recon_loss_x, label = 'test X reconstruction')
     ax2.legend()
-    ax3.plot(log.train.KLD, label = 'train KLD')
-    ax3.plot(log.test.KLD, label = 'test KLD')
+    ax2.set_xlabel('epoch')
+    ax3.plot(log.train.recon_loss_a, label = 'train A reconstruction')
+    ax3.plot(log.test.recon_loss_a, label = 'test A reconstruction')
     ax3.legend()
-    ax4.plot(log.train.l1_loss, label = 'train L1')
-    ax4.plot(log.test.l1_loss, label = 'test L1')
+    ax3.set_xlabel('epoch')
+    ax4.plot(log.train.kl_w, label = 'train $KL_W$')
+    ax4.plot(log.test.kl_w, label = 'test $KL_W$')
     ax4.legend()
+    ax4.set_xlabel('epoch')
+    ax5.plot(log.train.kl_z, label = 'train $KL_Z$')
+    ax5.plot(log.test.kl_z, label = 'test $KL_Z$')
+    ax5.legend()
+    ax5.set_xlabel('epoch')
+    ax6.plot(log.train.mse_A, label = 'train $MSE(A,\hat A)$')
+    ax6.plot(log.test.mse_A, label = 'test $MSE(A,\hat A)$')
+    ax6.legend()
+    ax6.set_xlabel('epoch')
     plt.show()
     
 def show_graphs(adjacency_matrix, ax = None):
@@ -26,7 +38,7 @@ def show_graphs(adjacency_matrix, ax = None):
     gr = nx.Graph()
     gr.add_edges_from(edges)
     if adjacency_matrix.shape[-1] == 61:
-        pos = np.genfromtxt('../Downloads/Easycap_Koordinaten_61CH(1).txt')[:,0:2]
+        pos = np.genfromtxt('../EEGraph/EEG_data/Easycap_Koordinaten_61CH.txt')[:,0:2]
         gr.remove_edges_from(nx.selfloop_edges(gr))
         nx.draw(gr, pos = pos, node_size=500, ax = ax)
     else:

@@ -3,12 +3,24 @@ import glob
 import random
 import torch
 import numpy as np
+import mne
+import scipy.io
 from torch_geometric.data import Data
 from torch_geometric.utils import dense_to_sparse, to_dense_adj, add_self_loops
 from utils import create_mask, add_edge, in_adjacency, get_copy
 
+def smooth(y, box_pts=50):
+    box = np.ones(box_pts)/box_pts
+    y_smooth = np.convolve(y, box, mode='same')
+    return y_smooth[100:400]
+
+def smooth_dataset(dataset):
+    for data in dataset:
+        data.x = torch.tensor(np.apply_along_axis(smooth, 1, data.x)).float()
+    return dataset
+
 class EEGData():
-    def __init__(self, file, tmin, tmax, y, threshold = 0.5):
+    def __init__(self, file, tmin, tmax, y, threshold, method, compress):
         """A graph with nodes carrying EEG signal
         Args:
             file (str): path to data.
@@ -17,10 +29,13 @@ class EEGData():
             y (int): label of the graph.
             threshold (float): threshold for correlation coefficient.
         """
-        self.ind = [[0,33],[1,34],[32,2,36,3],[37,4,38],[5,35,39,6],[40,41],[7,42],[8,60,9],[43,10],[44,45],[11,46,12],[47,13,48],[14,49,15],[16,50,17],[18,51,9],[20,52,21],[22,27],[53,23],[54,24,55],[25,56],[26,31],[28,57,58,29,59,30]]
+        #self.ind = [[0,33],[1,34],[32,2,36,3],[37,4,38],[5,35,39,6],[40,41],[7,42],[8,60,9],[43,10],[44,45],[11,46,12],[47,13,48],[14,49,15],[16,50,17],[18,51,9],[20,52,21],[22,27],[53,23],[54,24,55],[25,56],[26,31],[28,57,58,29,59,30]]
+        self.ind = [[0, 33,32, 2, 36, 3], [1, 34,5, 35, 39, 6], [37, 4, 38,8, 60, 9],[40,41,7,42],[43,10,44,45],[11,46,12,16,50,17],[14,49,15,20,52,21],[47,13,48,18,51,19],[22,27,53,23],[54,24,55,28,57,58,29,59,30],[25,56,26,31]]
         self.threshold = threshold
+        self.method = method
         self.x = self.normalize(np.loadtxt(file).T)[:, tmin:tmax]
-        self.x = self.compress(self.x)
+        if compress:
+            self.x = self.compress(self.x)
         self.adj = self.get_adj(self.x)
         self.edge_index = dense_to_sparse(self.adj)[0]
         self.y = y
@@ -33,8 +48,17 @@ class EEGData():
         Returns:
             Adjacency matrix with 1 if corr coefficient > self.threshold else 0.
         """
-        adj = (np.abs(np.corrcoef(x)) > self.threshold)*1.0
-        return torch.tensor(adj).long()
+        if self.method == 'corr':
+            adj = np.abs(np.corrcoef(x))
+        else:
+            con, freqs, times, n_epochs, n_tapers = mne.connectivity.spectral_connectivity(x.reshape(-1,x.shape[0],50), method = self.method, sfreq = 500, verbose = 0)
+            adj = con[:,:,0]
+            adj += adj.T
+        if self.threshold > 0:
+            adj = (adj > self.threshold)*1.0
+            return torch.tensor(adj).long().unsqueeze(0)
+        else:
+            return torch.tensor(adj).float().unsqueeze(0)
     
     def compress(self, x):
         return np.array([x[i].mean(0) for i in self.ind])
@@ -99,8 +123,104 @@ class CorrData():
         adj = (np.abs(np.corrcoef(x)) > 0.5)*1.0
         return torch.tensor(adj).long()
     
+class FHData():
+    def __init__(self, x, y, threshold, method):
+        """A graph with nodes carrying EEG signal
+        Args:
+            x (np.array): signal of shape [electrodes x time]
+            y (int): label of the graph.
+            threshold (float): threshold for correlation coefficient.
+        """
+        self.threshold = threshold
+        self.method = method
+        self.x = self.normalize(x)
+        self.adj = self.get_adj(self.x)
+        self.edge_index = dense_to_sparse(self.adj)[0]
+        self.y = y
+
+    def get_adj(self, x):
+        """
+        Construct adjacency matrix from a raw signal.
+        Args:
+            x (np.array): signal matrix of shape [n_nodes, len_signal].
+        Returns:
+            Adjacency matrix with 1 if corr coefficient > self.threshold else 0.
+        """
+        if self.method == 'corr':
+            adj = np.abs(np.corrcoef(x))
+        else:
+            con, freqs, times, n_epochs, n_tapers = mne.connectivity.spectral_connectivity(x.reshape(-1,x.shape[0],50), method = self.method, sfreq = 500, verbose = 0)
+            adj = con[:,:,0]
+            adj += adj.T
+        if self.threshold > 0:
+            adj = (adj > self.threshold)*1.0
+            return torch.tensor(adj).long().unsqueeze(0)
+        else:
+            return torch.tensor(adj).float().unsqueeze(0)
+    
+    def normalize(self, x):
+        return (x - x.min())/(x.max()-x.min())
+    
+
+    
+class FHDataset():
+    def __init__(self, folder, y, threshold, method):
+        """
+        Args:
+            folder (str): path to data.
+            y (int): label of the graph.
+            threshold (float): threshold for correlation coefficient.
+        """
+        self.threshold = threshold
+        self.method = method
+        self.dataset = self.make_dataset(folder, y)
+        
+    def make_dataset(self, folder, y):
+        """
+        Creates a dataset.
+        """
+        dataset = []
+        for file in glob.glob(folder + '/*'):
+            mat = scipy.io.loadmat(file)
+            if y == 0:
+                cond = np.isin(mat['stim'], [0,101]).reshape(-1)
+                x = mat['data'][np.where(cond),:].squeeze().T
+                a = x.shape[1]//(50*400)
+                print(x.shape)
+                x = x[:,:a*50*400].reshape(50,-1,400).transpose(1,0,2)
+                print(x.shape)
+            elif y == 1:
+                cond = np.isin(mat['stim'], range(1,51)).reshape(-1)
+                x = mat['data'][np.where(cond),:].squeeze().T.reshape(50,-1,400).transpose(1,0,2)
+                print(x.shape)
+            elif y == 2:
+                cond = np.isin(mat['stim'], range(51,101)).reshape(-1)
+                x = mat['data'][np.where(cond),:].squeeze().T.reshape(50,-1,400).transpose(1,0,2)
+            for i in range(x.shape[0]):
+                data = FHData(x[i], y, self.threshold, self.method)        
+                dataset.append(self.to_data(data))
+        random.shuffle(dataset)
+        return dataset   
+    @staticmethod
+    def to_data(data):
+        """
+        Turns CorrData instance into torch_geometric.data.Data
+        Args: 
+            data (CorrData): instance of CorrData class
+        Returns:
+            torch_geometric.data.Data instance
+        """
+        x = torch.tensor(data.x).float()
+        adj = data.adj
+        edge_index = data.edge_index
+        y = torch.tensor(data.y).long()
+        return Data(x = x, adj = adj, edge_index = edge_index, y = y)
+    def __add__(self, other):
+        self.dataset += other.dataset
+        return self
+    
 class EEGDataset():
-    def __init__(self, folder, tmin, tmax, y, threshold):
+    def __init__(self, folder, tmin, tmax, y, threshold, method, compress):
         """
         Args:
             folder (str): path to data.
@@ -110,6 +230,8 @@ class EEGDataset():
             threshold (float): threshold for correlation coefficient.
         """
         self.threshold = threshold
+        self.method = method
+        self.compress = compress
         self.dataset = self.make_dataset(folder, tmin, tmax, y)
         
     def make_dataset(self, folder, tmin, tmax, y):
@@ -118,8 +240,7 @@ class EEGDataset():
         """
         dataset = []
         for file in glob.glob(folder + '/*'):
-            data = EEGData(file, tmin, tmax, y, self.threshold)
-            
+            data = EEGData(file, tmin, tmax, y, self.threshold, self.method, self.compress)        
             dataset.append(self.to_data(data))
         random.shuffle(dataset)
         return dataset   
