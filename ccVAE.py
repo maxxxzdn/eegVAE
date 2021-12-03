@@ -28,7 +28,7 @@ class UnFlatten(nn.Module):
             return input.view(input.shape[0]*input.shape[1], -1, self.size)
         elif self.var == 'w':
             return input.view(-1, 64, 1, 1)
-  
+
 class Encoder_x(nn.Module):
     def __init__(self, n_nodes, latent_dim_z, drop_rate = 0.1):
         super().__init__()
@@ -157,12 +157,12 @@ def define_param():
 class CondPrior(nn.Module):
     def __init__(self, y_dim, w_dim):
         super(CondPrior, self).__init__()
-        self.fc = nn.Linear(y_dim, w_dim//2)
+        self.fc1 = nn.Linear(y_dim, w_dim//2)
         self.loc = nn.Linear(w_dim//2, w_dim)
         self.logvar = nn.Linear(w_dim//2, w_dim)
 
     def forward(self, x):
-        x = self.fc(x)
+        x = F.relu(self.fc1(x))
         return self.loc(x), (0.5*self.logvar(x)).exp()
 
 class Classifier(nn.Module):
@@ -181,6 +181,7 @@ class ccVAE(nn.Module):
         super().__init__()
         self.n_nodes = args.n_nodes
         self.n_classes = args.n_classes
+        self.scale_z = args.scale_z
         
         self.encoder_x = Encoder_x(args.n_nodes, args.latent_dim_z, args.drop_rate)
         self.decoder_z = Decoder_z(args.latent_dim_z, args.n_nodes, args.drop_rate)
@@ -233,7 +234,7 @@ class ccVAE(nn.Module):
         #λ(w)
         probs_y = self.classifier(w)
         #q(y|w)
-        qy_wc = dist.ContinuousBernoulli(logits = probs_y.detach())
+        qy_wc = dist.ContinuousBernoulli(probs_y)
         #μ(y)
         mean_w_prior, stddev_w_prior = self.cond_prior(data.y)
         #p(w|y)
@@ -241,10 +242,10 @@ class ccVAE(nn.Module):
 
         return px_z, qz_x, qy_wc, pa_w, qw_z, pw_y, mean_a, z, w
         
-    def loss_function(self, args):
+    def loss_function(self, args, use_w):
         x, a, y, px_z, qz_x, qy_wc, pa_w, qw_z, pw_y, z, w = args
         bs = x.shape[0]
-        pz = dist.Normal(0,1)   
+        pz = dist.Normal(0, self.scale_z)   
         
         log_px_z = px_z.log_prob(x).sum(-1).sum(-1)
         log_pa_w = pa_w.log_prob(a).sum(-1).sum(-1)
@@ -256,9 +257,9 @@ class ccVAE(nn.Module):
         log_qy_x = self.classifier_loss(x, y)
         log_py = dist.ContinuousBernoulli(self.y_prior_params.to(x.device).expand(bs, -1)).log_prob(y).sum(dim=-1)
                 
-        w = (log_qy_wc - log_qy_x).exp()
+        w = torch.clamp((log_qy_wc - log_qy_x).exp().detach(), 0., 5.)  if use_w else 1.
                 
-        elbo = (log_px_z - kl_z) + w*(log_pa_w - kl_w + log_qy_wc) + log_qy_x + log_py        
+        elbo = w*(log_px_z - kl_z + log_pa_w - kl_w + log_qy_wc) + log_qy_x + log_py     
         
         return -elbo.mean(), log_px_z.mean(), log_pa_w.mean(), log_qy_x.mean(), kl_z.mean(), kl_w.mean()
     
@@ -268,15 +269,15 @@ class ccVAE(nn.Module):
         return log_posterior - log_prior
         
     
-    def classifier_loss(self, x, y, k_z=1, k_w=1):
+    def classifier_loss(self, x, y, k_z=100, k_w=100):
         """
         Computes the classifier loss.
         """
         x = x.view(-1,500)
         z = dist.Normal(*self.encoder_x(x)).rsample([k_z]) 
         w = dist.Normal(*self.encoder_z(z)).rsample([k_w])
-        logits = self.classifier(w)
-        d = dist.ContinuousBernoulli(logits=logits)
+        probs_y = self.classifier(w)
+        d = dist.ContinuousBernoulli(probs_y)
         y = y.expand(k_w, k_z, -1, -1,).contiguous()
         lqy_w = d.log_prob(y).sum(-1)
         lqy_x = torch.logsumexp(lqy_w, dim=[0,1]) - math.log(k_z) - math.log(k_w)
