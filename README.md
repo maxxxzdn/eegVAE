@@ -8,7 +8,7 @@ where X - graph node features, A - connectivity matrix, Z - latent node features
 
 To do so, we create an inference model of the following form: 
 
-<a href="https://www.codecogs.com/eqnedit.php?latex=q(Z,&space;\omega|X,A)&space;=&space;q(Z|X)\cdot&space;q(\omega|Z)" target="_blank"><img src="https://latex.codecogs.com/gif.latex?q(Z,&space;\omega|X,A)&space;=&space;q(Z|X)\cdot&space;q(\omega|Z)" title="q(Z, \omega|X,A) = q(Z|X)\cdot q(\omega|Z)" /></a>
+<a href="https://www.codecogs.com/eqnedit.php?latex=q(Z,&space;\omega|X,A)&space;=&space;q(Z|X)\cdot&space;q(\omega|Z)" target="_blank"><img src="https://latex.codecogs.com/gif.latex?q(Z,&space;\omega|X,A)&space;=&space;q(Z|X)\cdot&space;q(\omega|A)" title="q(Z, \omega|X,A) = q(Z|X)\cdot q(\omega|A)" /></a>
 
 The model is learned further via VAE.
 
