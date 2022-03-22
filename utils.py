@@ -4,7 +4,17 @@ import torch
 import torch.distributions as dist
 
 def run_ccvae(cc_vae, optim, train_loader, test_loader, n_epochs = 100, verbose = True):
-    
+   """
+    Input: 
+        cc_vae: CCVAE model.
+        optim (torch.optim): optimizer object.
+        train_loader (torch.utils.data.DataLoader): loader containing train data.
+	train_loader (torch.utils.data.DataLoader): loader containing test data.
+        n_epochs (int): number of epochs to train a model for.
+        verbose (bool): writes train & test accuracies for each epoch if True.
+    Output:
+        Trained CCVAE model.
+    """  
     it = range(0, n_epochs) if verbose else tqdm(range(0, n_epochs))
         
     for epoch in it:

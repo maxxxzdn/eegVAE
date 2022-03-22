@@ -7,7 +7,17 @@ import matplotlib.pyplot as plt
 import torch.distributions as dist
 
 def visualize_latent(cc_vae, x, y, label_names, k = 100, n_priors = 5):
-    
+   """
+    Input: 
+        cc_vae: CCVAE model.
+        x (torch.tensor): input data.
+        y (torch.tensor): labels.
+	label_names (list of str): name of each dimension.
+	k (int): number of samples for each image of x.
+	n_priors (int): number of dimensions of latent space to visualise.
+    Output:
+        Ridgeline plot with n_priors distributions. 
+    """
     sns.set_theme(style="white", rc={"axes.facecolor": (0, 0, 0, 0)})
     sns.set_context("paper", rc={"xtick.labelsize":32,"axes.labelsize":48}) 
     

@@ -7,6 +7,8 @@ import torch.distributions as dist
 import os
 from networks import Classifier, CondPrior
 
+# Originally developed by https://github.com/thwjoy/ccvae_pytorch/
+# See https://arxiv.org/abs/2006.10102 for details
 
 def compute_kl(locs_q, scale_q, locs_p=None, scale_p=None):
     """
