@@ -4,6 +4,7 @@ Official implementation of:
 
 **Learning Generative Factors of Neuroimaging Data with Variational auto-encoders**  
 Maksim Zhdanov*, Saskia Steinmann, Nico Hoffmann
+
 https://arxiv.org/abs/2206.01939
 
 <img src="model_scheme.png" width="800">
